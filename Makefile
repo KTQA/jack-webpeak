@@ -12,7 +12,7 @@ all: jack-peak
 jack-peak: jack-peak.c
 
 jack-peak.1: jack-peak
-	help2man -N -o jack-peak.1 -n "captures audio-data from JACK and writes peak-signal" ./jack-peak
+	help2man -N -o jack-peak.1 -n "live peak-signal meter for JACK" ./jack-peak
 
 install: all
 	install -d $(DESTDIR)$(PREFIX)/bin

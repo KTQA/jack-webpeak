@@ -50,6 +50,7 @@ typedef struct _thread_info {
 	useconds_t delay;
 	float *peak;
 	int format;
+	float iecmult;
 	FILE *outfd;
 	volatile int can_capture;
 	volatile int can_process;
@@ -122,11 +123,11 @@ void * io_thread (void *arg) {
 					case 0:
 						printf("%3.3f  ", info->peak[chn]); break;
 					case 2:
-						fprintf(info->outfd,"%3d  ", peak_db(info->peak[chn], 1.0, 2.0)); break;
+						fprintf(info->outfd,"%3d  ", peak_db(info->peak[chn], 1.0, info->iecmult)); break;
 					case 4:
 						printf("%3.3f,", info->peak[chn]); break;
 					case 6:
-						fprintf(info->outfd,"%3d,", peak_db(info->peak[chn], 1.0, 2.0)); break;
+						fprintf(info->outfd,"%3d,", peak_db(info->peak[chn], 1.0, info->iecmult)); break;
 				}
 				info->peak[chn]=0.0;
 			}
@@ -240,18 +241,28 @@ void catchsig (int sig) {
 
 static void usage (char *name, int status) {
   fprintf (status?stderr:stdout,
-			"%s - captures audio-data from JACK and writes peak-signal\n\n", basename(name));
+			"%s - live peak-signal meter for JACK\n", basename(name));
+  fprintf (status?stderr:stdout,
+"Utility to write audio peak data to stdout of file as plain text of JSON data.\n"
+"\n"
+	);
 	fprintf(status?stderr:stdout,
 			"Usage: %s [ OPTIONS ] port1 [ port2 ... ]\n\n", name);
 	fprintf(status?stderr:stdout,
 "Options:\n"
+"  -d, --delay <int>        output speed in miliseconds (default 100ms)\n"
+"                           a delay of zero writes at jack-period intervals\n"
+"  -f, --file <path>        write to file instead of stdout\n"
 "  -h, --help               print this message\n"
+"  -i, --iec268 <mult>      use dB scale; output range 0-<mult> (integer)\n"
+"                           - if not specified, output range is linear [0..1]\n"
+"  -j, --json               write JSON format instead of plain text\n"
 "  -q, --quiet              inhibit usual output\n"
 "\n"
 "Examples:\n"
-"  jack-peak system:capture_1\n"
+"jack-peak system:capture_1 system:capture_2\n"
 "\n"
-"  jack-peak --iec268 --json --delay 100 --file /tmp/peaks.json system:capture_1 system:capture_2\n"
+"jack-peak --iec268 200 --json --file /tmp/peaks.json system:capture_1\n"
 "\n"
 "Report bugs to <robin@gareus.org>.\n"
 "Website and manual: <http://gareus.org/oss/jack_peak>\n"
@@ -269,13 +280,14 @@ int main (int argc, char **argv) {
 	thread_info.channels = 2;
 	thread_info.delay = 100000;
 	thread_info.format = 0;
+	thread_info.iecmult = 2.0;
 	thread_info.outfd = NULL;
 
 	const char *optstring = "hqjid:f:V";
 	struct option long_options[] = {
 		{ "help",    no_argument,       0, 'h' },
 		{ "json",    no_argument,       0, 'j' },
-		{ "iec268",  no_argument,       0, 'i' },
+		{ "iec268",  required_argument, 0, 'i' },
 		{ "file",    required_argument, 0, 'f' },
 		{ "delay",   required_argument, 0, 'd' },
 		{ "quiet",   no_argument,       0, 'q' },
@@ -293,6 +305,7 @@ int main (int argc, char **argv) {
 				break;
 			case 'i':
 				thread_info.format|=2;
+				thread_info.iecmult = atof(optarg)/100.0;
 				break;
 			case 'j':
 				thread_info.format|=4;
