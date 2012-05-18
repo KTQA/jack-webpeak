@@ -38,7 +38,7 @@
 #include <jack/jack.h>
 
 #ifndef VERSION
-#define VERSION "0.1.0"
+#define VERSION "0.2"
 #endif
 
 typedef struct _thread_info {
