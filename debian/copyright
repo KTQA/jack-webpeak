@@ -1,8 +1,10 @@
-Format-Specification: http://svn.debian.org/wsvn/dep/web/deps/dep5.mdwn?op=file&rev=142
-Name: jack-peak
+Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: jack-peak
 Maintainer: Robin Gareus <robin@gareus.org>
+Upstream-Contact: Robin Gareus <robin@gareus.org>
 Source: git://rg42.org/jack-peak/
 
+Files: *
 Copyright: 2012 Robin Gareus <robin@gareus.org>
 License: GPL-2+
 
