@@ -38,7 +38,7 @@
 #include <jack/jack.h>
 
 #ifndef VERSION
-#define VERSION "0.2"
+#define VERSION "0.3"
 #endif
 
 typedef struct _thread_info {
@@ -283,7 +283,7 @@ int main (int argc, char **argv) {
 	thread_info.iecmult = 2.0;
 	thread_info.outfd = NULL;
 
-	const char *optstring = "hqjid:f:V";
+	const char *optstring = "hqji:d:f:V";
 	struct option long_options[] = {
 		{ "help",    no_argument,       0, 'h' },
 		{ "json",    no_argument,       0, 'j' },
