@@ -1,3 +1,9 @@
+jack-peak (0.4-1) unstable; urgency=low
+
+  * added max-peak hold feature
+
+ -- Robin Gareus <robin@gareus.org>  Wed, 23 May 2012 16:30:39 +0200
+
 jack-peak (0.3-1) unstable; urgency=low
 
   * fixed issue with commandline -i arg.
