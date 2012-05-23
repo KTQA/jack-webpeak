@@ -38,17 +38,26 @@
 #include <jack/jack.h>
 
 #ifndef VERSION
-#define VERSION "0.3"
+#define VERSION "0.4"
 #endif
 
 typedef struct _thread_info {
 	pthread_t thread_id;
 	pthread_t mesg_thread_id;
-	jack_nframes_t rb_size;
+	jack_nframes_t samplerate;
 	jack_client_t *client;
 	unsigned int channels;
 	useconds_t delay;
 	float *peak;
+	float *pmax;
+	int   *ptme;
+	/* format - bitwise
+	 * 1  (1) -- on: print carrige-return, off: print newline
+	 * 2  (2) -- on: IEC-268 dB scale, off: linear float
+	 * 3  (4) -- on: JSON, off: plain text
+	 * 4  (8) -- include peak-hold
+	 * 5 (16) --
+	 */
 	int format;
 	float iecmult;
 	FILE *outfd;
@@ -125,11 +134,31 @@ void * io_thread (void *arg) {
 					case 2:
 						fprintf(info->outfd,"%3d  ", peak_db(info->peak[chn], 1.0, info->iecmult)); break;
 					case 4:
-						printf("%3.3f,", info->peak[chn]); break;
+						printf("%.3f,", info->peak[chn]); break;
 					case 6:
-						fprintf(info->outfd,"%3d,", peak_db(info->peak[chn], 1.0, info->iecmult)); break;
+						fprintf(info->outfd,"%d,", peak_db(info->peak[chn], 1.0, info->iecmult)); break;
 				}
 				info->peak[chn]=0.0;
+			}
+			if (info->format&8) { // add peak-hold
+				if (info->format&4) {
+					fprintf(info->outfd,"],\"max\":[");
+				} else {
+					fprintf(info->outfd," | ");
+				}
+
+				for (chn = 0; chn < info->channels; ++chn) {
+					switch (info->format&6) {
+						case 0:
+							printf("%3.3f  ", info->pmax[chn]); break;
+						case 2:
+							fprintf(info->outfd,"%3d  ", peak_db(info->pmax[chn], 1.0, info->iecmult)); break;
+						case 4:
+							printf("%.3f,", info->pmax[chn]); break;
+						case 6:
+							fprintf(info->outfd,"%d,", peak_db(info->pmax[chn], 1.0, info->iecmult)); break;
+					}
+				}
 			}
 			switch (info->format&6) {
 				case 6:
@@ -174,6 +203,20 @@ int process (jack_nframes_t nframes, void *arg) {
 			if (js > info->peak[chn]) info->peak[chn] = js;
 		}
 	}
+
+	const int pkhld = 2 * info->samplerate / nframes; // 2 seconds
+
+	for (chn = 0; chn < info->channels; ++chn) {
+		if (info->peak[chn] > info->pmax[chn]) {
+			info->pmax[chn] = info->peak[chn];
+			info->ptme[chn] = 0;
+		} else if (info->ptme[chn] <= pkhld) {
+			(info->ptme[chn])++;
+		} else {
+			info->pmax[chn] = info->peak[chn];
+		}
+	}
+
 	/* Tell the io thread there is work to do. */
 	if (pthread_mutex_trylock(&io_thread_lock) == 0) {
 	    pthread_cond_signal(&data_ready);
@@ -191,7 +234,9 @@ void setup_ports (int nports, char *source_names[], jack_thread_info_t *info) {
 	unsigned int i;
 	const size_t in_size =  nports * sizeof(jack_default_audio_sample_t *);
 
-	info->peak = malloc(sizeof(float *) * nports);
+	info->peak = malloc(sizeof(float) * nports);
+	info->pmax = malloc(sizeof(float) * nports);
+	info->ptme = malloc(sizeof(int  ) * nports);
 
 	/* Allocate data structures that depend on the number of ports. */
 	ports = (jack_port_t **) malloc(sizeof(jack_port_t *) * nports);
@@ -201,6 +246,7 @@ void setup_ports (int nports, char *source_names[], jack_thread_info_t *info) {
 	for (i = 0; i < nports; i++) {
 		char name[64];
 		info->peak[i]=0.0;
+		info->ptme[i]=0;
 
 		sprintf(name, "input%d", i+1);
 
@@ -257,6 +303,7 @@ static void usage (char *name, int status) {
 "  -i, --iec268 <mult>      use dB scale; output range 0-<mult> (integer)\n"
 "                           - if not specified, output range is linear [0..1]\n"
 "  -j, --json               write JSON format instead of plain text\n"
+"  -p, --peakhold           add peak-hold information.\n"
 "  -q, --quiet              inhibit usual output\n"
 "\n"
 "Examples:\n"
@@ -283,15 +330,16 @@ int main (int argc, char **argv) {
 	thread_info.iecmult = 2.0;
 	thread_info.outfd = NULL;
 
-	const char *optstring = "hqji:d:f:V";
+	const char *optstring = "hqpji:d:f:V";
 	struct option long_options[] = {
-		{ "help",    no_argument,       0, 'h' },
-		{ "json",    no_argument,       0, 'j' },
-		{ "iec268",  required_argument, 0, 'i' },
-		{ "file",    required_argument, 0, 'f' },
-		{ "delay",   required_argument, 0, 'd' },
-		{ "quiet",   no_argument,       0, 'q' },
-		{ "version", no_argument,       0, 'V' },
+		{ "help",     no_argument,       0, 'h' },
+		{ "json",     no_argument,       0, 'j' },
+		{ "iec268",   required_argument, 0, 'i' },
+		{ "file",     required_argument, 0, 'f' },
+		{ "delay",    required_argument, 0, 'd' },
+		{ "peakhold", required_argument, 0, 'p' },
+		{ "quiet",    no_argument,       0, 'q' },
+		{ "version",  no_argument,       0, 'V' },
 		{ 0, 0, 0, 0 }
 	};
 
@@ -309,6 +357,9 @@ int main (int argc, char **argv) {
 				break;
 			case 'j':
 				thread_info.format|=4;
+				break;
+			case 'p':
+				thread_info.format|=8;
 				break;
 			case 'f':
 				if (thread_info.outfd) fclose(thread_info.outfd);
@@ -369,12 +420,13 @@ int main (int argc, char **argv) {
 #ifndef _WIN32
 	signal (SIGHUP, catchsig);
 #endif
+	thread_info.samplerate = jack_get_sample_rate(thread_info.client);
 
 	if (!want_quiet) {
 		fprintf(stderr, "%i channel%s, @%iSPS.\n",
 			thread_info.channels,
 			(thread_info.channels>1)?"s":"",
-		  jack_get_sample_rate(thread_info.client)
+			thread_info.samplerate
 		);
 	}
 
