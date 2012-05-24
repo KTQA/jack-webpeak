@@ -38,7 +38,7 @@
 #include <jack/jack.h>
 
 #ifndef VERSION
-#define VERSION "0.4"
+#define VERSION "0.5"
 #endif
 
 typedef struct _thread_info {
@@ -171,8 +171,10 @@ void * io_thread (void *arg) {
 
 			if (info->format&1)
 				fprintf(info->outfd, "\r"); 
-			else
+			else {
 				fprintf(info->outfd, "\n"); 
+				ftruncate(fileno(info->outfd), ftell(info->outfd));
+			}
 
 			fflush(info->outfd);
 
