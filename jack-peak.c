@@ -36,15 +36,17 @@
 #include <math.h>
 #include <errno.h>
 #include <jack/jack.h>
+#include <sys/file.h>
 
 #ifndef VERSION
-#define VERSION "0.5"
+#define VERSION "0.6"
 #endif
 
 typedef struct _thread_info {
 	pthread_t thread_id;
 	pthread_t mesg_thread_id;
 	jack_nframes_t samplerate;
+	jack_nframes_t buffersize;
 	jack_client_t *client;
 	unsigned int channels;
 	useconds_t delay;
@@ -114,11 +116,14 @@ void * io_thread (void *arg) {
 	pthread_mutex_lock(&io_thread_lock);
 
 	while (run) {
-		/* Write the data one frame at a time.  This is
-		 * inefficient, but makes things simpler. */
+		const int pkhld = ceilf(2.0 / ( (info->delay/1000000.0) + ((float)info->buffersize / (float)info->samplerate)));
+
 		if (info->can_capture) {
 			int chn;
-			fseek(info->outfd, 0L, SEEK_SET);
+			if ((info->format&1)==0) {
+				if (flock(fileno(info->outfd), LOCK_EX)) continue; // pthread_cond_wait ?
+				fseek(info->outfd, 0L, SEEK_SET);
+			}
 			switch (info->format&6) {
 				case 6:
 				case 4:
@@ -138,6 +143,16 @@ void * io_thread (void *arg) {
 					case 6:
 						fprintf(info->outfd,"%d,", peak_db(info->peak[chn], 1.0, info->iecmult)); break;
 				}
+
+				if (info->peak[chn] > info->pmax[chn]) {
+					info->pmax[chn] = info->peak[chn];
+					info->ptme[chn] = 0;
+				} else if (info->ptme[chn] <= pkhld) {
+					(info->ptme[chn])++;
+				} else {
+					info->pmax[chn] = info->peak[chn];
+				}
+
 				info->peak[chn]=0.0;
 			}
 			if (info->format&8) { // add peak-hold
@@ -170,10 +185,11 @@ void * io_thread (void *arg) {
 			}
 
 			if (info->format&1)
-				fprintf(info->outfd, "\r"); 
+				fprintf(info->outfd, "\r");
 			else {
-				fprintf(info->outfd, "\n"); 
 				ftruncate(fileno(info->outfd), ftell(info->outfd));
+				fprintf(info->outfd, "\n");
+				flock(fileno(info->outfd), LOCK_UN);
 			}
 
 			fflush(info->outfd);
@@ -184,6 +200,12 @@ void * io_thread (void *arg) {
 	}
 
 	pthread_mutex_unlock(&io_thread_lock);
+	return 0;
+}
+
+int jack_bufsiz_cb(jack_nframes_t nframes, void *arg) {
+	jack_thread_info_t *info = (jack_thread_info_t *) arg;
+	info->buffersize=nframes;
 	return 0;
 }
 	
@@ -203,19 +225,6 @@ int process (jack_nframes_t nframes, void *arg) {
 		for (chn = 0; chn < info->channels; ++chn) {
 			const float js = fabsf(in[chn][i]);
 			if (js > info->peak[chn]) info->peak[chn] = js;
-		}
-	}
-
-	const int pkhld = 2 * info->samplerate / nframes; // 2 seconds
-
-	for (chn = 0; chn < info->channels; ++chn) {
-		if (info->peak[chn] > info->pmax[chn]) {
-			info->pmax[chn] = info->peak[chn];
-			info->ptme[chn] = 0;
-		} else if (info->ptme[chn] <= pkhld) {
-			(info->ptme[chn])++;
-		} else {
-			info->pmax[chn] = info->peak[chn];
 		}
 	}
 
@@ -368,7 +377,7 @@ int main (int argc, char **argv) {
 				thread_info.outfd = fopen(optarg, "w");
 				break;
 			case 'd':
-				if (atol(optarg) < 0 || atol(optarg) > 60000) 
+				if (atol(optarg) < 0 || atol(optarg) > 60000)
 					fprintf(stderr, "delay: time out of bounds.\n");
 				else
 					thread_info.delay = 1000*atol(optarg);
@@ -388,7 +397,7 @@ int main (int argc, char **argv) {
 		}
 	}
 
-	if (!thread_info.outfd) { 
+	if (!thread_info.outfd) {
 		thread_info.outfd=stdout;
 		thread_info.format|=1;
 	}
@@ -410,6 +419,7 @@ int main (int argc, char **argv) {
 
 	jack_set_process_callback(client, process, &thread_info);
 	jack_on_shutdown(client, jack_shutdown, &thread_info);
+	jack_set_buffer_size_callback(client, jack_bufsiz_cb, &thread_info);
 
 	if (jack_activate(client)) {
 		fprintf(stderr, "cannot activate client");
@@ -436,7 +446,7 @@ int main (int argc, char **argv) {
 	thread_info.can_capture = 1;
 	pthread_join(thread_info.thread_id, NULL);
 
-	if (thread_info.outfd != stdout) 
+	if (thread_info.outfd != stdout)
 		fclose(thread_info.outfd);
 
 	jack_client_close(client);
