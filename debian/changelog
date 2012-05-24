@@ -1,3 +1,11 @@
+jack-peak (0.6-1) unstable; urgency=low
+
+  * reworked I/O
+  * flock file before write
+  * move peak calc to write thread
+
+ -- Robin Gareus <robin@gareus.org>  Thu, 24 May 2012 04:39:59 +0200
+
 jack-peak (0.5-1) unstable; urgency=low
 
   * truncate file at end.
