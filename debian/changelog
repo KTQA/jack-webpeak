@@ -1,3 +1,9 @@
+jack-peak (0.5-1) unstable; urgency=low
+
+  * truncate file at end.
+
+ -- Robin Gareus <robin@gareus.org>  Thu, 24 May 2012 03:24:58 +0200 
+
 jack-peak (0.4-1) unstable; urgency=low
 
   * added max-peak hold feature
