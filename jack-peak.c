@@ -39,7 +39,7 @@
 #include <sys/file.h>
 
 #ifndef VERSION
-#define VERSION "0.6"
+#define VERSION "0.7"
 #endif
 
 typedef struct _thread_info {
@@ -90,6 +90,8 @@ void cleanup(jack_thread_info_t *info) {
 	free(info->ptme);
 	free(in); free(ports);
 }
+
+/* output functions and helpers */
 
 float iec_scale(float db) {
 	 float def = 0.0f;
@@ -164,7 +166,6 @@ void * io_thread (void *arg) {
 				} else {
 					info->pmax[chn] = info->peak[chn];
 				}
-
 			}
 			if (info->format&8) { // add peak-hold
 				if (info->format&4) {
@@ -213,6 +214,8 @@ void * io_thread (void *arg) {
 	pthread_mutex_unlock(&io_thread_lock);
 	return 0;
 }
+
+/* jack callbacks */
 
 int jack_bufsiz_cb(jack_nframes_t nframes, void *arg) {
 	jack_thread_info_t *info = (jack_thread_info_t *) arg;
@@ -295,6 +298,8 @@ void setup_ports (int nports, char *source_names[], jack_thread_info_t *info) {
 	/* process() can start, now */
 	info->can_process = 1;
 }
+
+/* main */
 
 void catchsig (int sig) {
 #ifndef _WIN32
