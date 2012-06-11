@@ -39,7 +39,7 @@
 #include <sys/file.h>
 
 #ifndef VERSION
-#define VERSION "0.7"
+#define VERSION "0.8"
 #endif
 
 typedef struct _thread_info {
