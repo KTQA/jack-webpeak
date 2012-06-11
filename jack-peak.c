@@ -83,6 +83,14 @@ pthread_cond_t  data_ready = PTHREAD_COND_INITIALIZER;
 int want_quiet = 0;
 volatile int run = 1;
 
+void cleanup(jack_thread_info_t *info) {
+	free(info->peak);
+	free(info->pcur);
+	free(info->pmax);
+	free(info->ptme);
+	free(in); free(ports);
+}
+
 float iec_scale(float db) {
 	 float def = 0.0f;
 
@@ -269,6 +277,7 @@ void setup_ports (int nports, char *source_names[], jack_thread_info_t *info) {
 		if ((ports[i] = jack_port_register(info->client, name, JACK_DEFAULT_AUDIO_TYPE, JackPortIsInput, 0)) == 0) {
 			fprintf(stderr, "cannot register input port \"%s\"!\n", name);
 			jack_client_close(info->client);
+			cleanup(info);
 			exit(1);
 		}
 	}
@@ -455,5 +464,8 @@ int main (int argc, char **argv) {
 		fclose(thread_info.outfd);
 
 	jack_client_close(client);
+
+	cleanup(&thread_info);
+
 	return(0);
 }
