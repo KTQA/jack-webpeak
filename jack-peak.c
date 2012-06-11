@@ -51,6 +51,7 @@ typedef struct _thread_info {
 	unsigned int channels;
 	useconds_t delay;
 	float *peak;
+	float *pcur;
 	float *pmax;
 	int   *ptme;
 	/* format - bitwise
@@ -120,6 +121,9 @@ void * io_thread (void *arg) {
 
 		if (info->can_capture) {
 			int chn;
+			memcpy(info->peak, info->pcur, sizeof(float)*info->channels);
+			for (chn = 0; chn < info->channels; ++chn) { info->pcur[chn]=0.0; }
+
 			if ((info->format&1)==0) {
 				if (flock(fileno(info->outfd), LOCK_EX)) continue; // pthread_cond_wait ?
 				fseek(info->outfd, 0L, SEEK_SET);
@@ -153,7 +157,6 @@ void * io_thread (void *arg) {
 					info->pmax[chn] = info->peak[chn];
 				}
 
-				info->peak[chn]=0.0;
 			}
 			if (info->format&8) { // add peak-hold
 				if (info->format&4) {
@@ -224,7 +227,7 @@ int process (jack_nframes_t nframes, void *arg) {
 	for (i = 0; i < nframes; i++) {
 		for (chn = 0; chn < info->channels; ++chn) {
 			const float js = fabsf(in[chn][i]);
-			if (js > info->peak[chn]) info->peak[chn] = js;
+			if (js > info->pcur[chn]) info->pcur[chn] = js;
 		}
 	}
 
@@ -246,6 +249,7 @@ void setup_ports (int nports, char *source_names[], jack_thread_info_t *info) {
 	const size_t in_size =  nports * sizeof(jack_default_audio_sample_t *);
 
 	info->peak = malloc(sizeof(float) * nports);
+	info->pcur = malloc(sizeof(float) * nports);
 	info->pmax = malloc(sizeof(float) * nports);
 	info->ptme = malloc(sizeof(int  ) * nports);
 
@@ -257,6 +261,7 @@ void setup_ports (int nports, char *source_names[], jack_thread_info_t *info) {
 	for (i = 0; i < nports; i++) {
 		char name[64];
 		info->peak[i]=0.0;
+		info->pcur[i]=0.0;
 		info->ptme[i]=0;
 
 		sprintf(name, "input%d", i+1);
