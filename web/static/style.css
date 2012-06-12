@@ -1,0 +1,106 @@
+* {
+	padding:0;
+	margin:0;
+}
+
+body {
+	background:#404040;
+	color:#efe;
+	font-size:12px;
+	font-family: Arial, sans-serif;
+}
+
+a {
+	color:#ace;
+	text-decoration:none;
+}
+
+img {
+	border:0;
+}
+
+div.container {
+	width:50em;
+	margin:1em auto;
+}
+
+h1,h2 {
+	margin: .25em 0 .75em;
+}
+
+div.footer {
+	margin:.5em auto;
+	border-top: 1px dotted #888;
+	text-align:center;
+	color:#888;
+	width:55em;
+}
+
+.center {
+	text-align:center;
+}
+
+div.clearer {
+	clear:both;
+	height:0px;
+}
+
+button {
+	border-color:#666;
+	background-color:#888;
+}
+
+button[disabled]:active, button[disabled] {
+	border-color:#404040;
+	border-style:inset;
+	background-color:#4d4d4d;
+}
+
+/* meterbox */
+
+div.meterbox {
+	min-height:20em;
+	padding-top:2em;
+}
+
+div.meters {
+	margin: 0 auto;
+	overflow:hidden;
+}
+
+div.meter {
+	width:37px;
+	height:210px;
+	float:left;
+	position:relative;
+}
+
+div.meter img {
+	position:absolute;
+	bottom:0;
+	left:0;
+	z-index:100;
+}
+
+div.meterscale {
+	position:absolute;
+	bottom:5px;
+	left:0;
+	width:30px;
+	background: red;
+	z-index:50;
+}
+
+div.meterpeak {
+	position:absolute;
+	left:0;
+	height:1px;
+	width:30px;
+	background: yellow;
+	z-index:60;
+}
+
+div.doc {
+	font-size:90%;
+	color:#aaa;
+}
