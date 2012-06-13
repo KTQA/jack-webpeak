@@ -7,11 +7,11 @@ via a web interface. It is meant for inspiration and to demonstrate the idea.
 
 1) Setup website
 
-Make this folder accessible via a PHP-5 capable webserver.
+Make this folder accessible via a PHP capable web-server.
 
 2) [optional] configure PHP site
 
-edit meterpeak.php - set path to METERFILE (default /tmp/peaks.json)
+Edit meterpeak.php - set path to METERFILE (default /tmp/peaks.json)
 edit index.php - set maximum channel-count to display (default: 8)
 
 3) Set permissions
@@ -25,26 +25,26 @@ METERFILE will be owned by this user.
 
 3a) if you have sudo permissions
 
-  METERFILE=/tmp/peaks.json
-  WWWUSER=www-data
-  touch $METERFILE
-  chmod g+w $METERFILE
-  sudo chgrp $WWWUSER $METERFILE
+	METERFILE=/tmp/peaks.json
+	WWWUSER=www-data
+	touch $METERFILE
+	chmod g+w $METERFILE
+	sudo chgrp $WWWUSER $METERFILE
 
 3b) if you don't have sudo permissions
 
-  METERFILE=/tmp/peaks.json
-  touch $METERFILE
-  chmod 0666 $METERFILE
+	METERFILE=/tmp/peaks.json
+	touch $METERFILE
+	chmod 0666 $METERFILE
 
 4) launch jack-peak
 
-  METERFILE=/tmp/peaks.json
-  PORTS=system:capture_1 system:capture_2
-  jack-peak -i 200 -j -p -f $METERFILE $PORTS
+	METERFILE=/tmp/peaks.json
+	PORTS="system:capture_1 system:capture_2"
+	jack-peak -i 200 -j -p -f $METERFILE $PORTS
 
--i 200 : IEC-268-16 scale, 200px high
--j     : JSON output
--p     : include peak-hold data
--f ..  : write to file
-
+Notes on options:
+ -i 200 : IEC-268-16 scale, 200px high
+ -j     : JSON output
+ -p     : include peak-hold data
+ -f ..  : write to file
