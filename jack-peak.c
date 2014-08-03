@@ -149,11 +149,11 @@ void * io_thread (void *arg) {
 			for (chn = 0; chn < info->channels; ++chn) {
 				switch (info->format&6) {
 					case 0:
-						printf("%3.3f  ", info->peak[chn]); break;
+						fprintf(info->outfd, "%3.3f  ", info->peak[chn]); break;
 					case 2:
 						fprintf(info->outfd,"%3d  ", peak_db(info->peak[chn], 1.0, info->iecmult)); break;
 					case 4:
-						printf("%.3f,", info->peak[chn]); break;
+						fprintf(info->outfd, "%.3f,", info->peak[chn]); break;
 					case 6:
 						fprintf(info->outfd,"%d,", peak_db(info->peak[chn], 1.0, info->iecmult)); break;
 				}
@@ -177,11 +177,11 @@ void * io_thread (void *arg) {
 				for (chn = 0; chn < info->channels; ++chn) {
 					switch (info->format&6) {
 						case 0:
-							printf("%3.3f  ", info->pmax[chn]); break;
+							fprintf(info->outfd, "%3.3f  ", info->pmax[chn]); break;
 						case 2:
 							fprintf(info->outfd,"%3d  ", peak_db(info->pmax[chn], 1.0, info->iecmult)); break;
 						case 4:
-							printf("%.3f,", info->pmax[chn]); break;
+							fprintf(info->outfd, "%.3f,", info->pmax[chn]); break;
 						case 6:
 							fprintf(info->outfd,"%d,", peak_db(info->pmax[chn], 1.0, info->iecmult)); break;
 					}
