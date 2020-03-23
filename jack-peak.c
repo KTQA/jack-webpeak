@@ -153,9 +153,13 @@ void * io_thread (void *arg) {
 					case 2:
 						fprintf(info->outfd,"%3d  ", peak_db(info->peak[chn], 1.0, info->iecmult)); break;
 					case 4:
-						fprintf(info->outfd, "%.3f,", info->peak[chn]); break;
+						fprintf(info->outfd, "%.3f", info->peak[chn]);
+						if (chn < info->channels - 1) fprintf(info->outfd,",");
+						break;
 					case 6:
-						fprintf(info->outfd,"%d,", peak_db(info->peak[chn], 1.0, info->iecmult)); break;
+						fprintf(info->outfd,"%d", peak_db(info->peak[chn], 1.0, info->iecmult));
+						if (chn < info->channels - 1) fprintf(info->outfd,",");
+						break;
 				}
 
 				if (info->peak[chn] > info->pmax[chn]) {
@@ -397,7 +401,6 @@ int main (int argc, char **argv) {
 				thread_info.format|=8;
 				break;
 			case 'n':
-				printf("newlined!\n");
 				thread_info.format|=16;
 				break;
 			case 'f':
