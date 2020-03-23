@@ -55,11 +55,11 @@ typedef struct _thread_info {
 	float *pmax;
 	int   *ptme;
 	/* format - bitwise
-	 * 1  (1) -- on: print carrige-return, off: print newline
+	 * 1  (1) -- on: file IO instead of stdout
 	 * 2  (2) -- on: IEC-268 dB scale, off: linear float
 	 * 3  (4) -- on: JSON, off: plain text
 	 * 4  (8) -- include peak-hold
-	 * 5 (16) --
+	 * 5 (16) -- on: print newline, off: print cr
 	 */
 	int format;
 	float iecmult;
@@ -196,11 +196,14 @@ void * io_thread (void *arg) {
 					break;
 			}
 
-			if (info->format&1)
-				fprintf(info->outfd, "\r");
-			else {
-				ftruncate(fileno(info->outfd), ftell(info->outfd));
+			if (info->format & 16) {
 				fprintf(info->outfd, "\n");
+			} else {
+				fprintf(info->outfd, "\r");
+			}
+
+			if ( !(info->format & 1) ) {
+				ftruncate(fileno(info->outfd), ftell(info->outfd));
 				flock(fileno(info->outfd), LOCK_UN);
 			}
 
@@ -335,6 +338,7 @@ static void usage (char *name, int status) {
 "  -j, --json               write JSON format instead of plain text\n"
 "  -p, --peakhold           add peak-hold information.\n"
 "  -q, --quiet              inhibit usual output\n"
+"  -n, --newline            force newline\n"
 "\n"
 "Examples:\n"
 "jack-peak system:capture_1 system:capture_2\n"
@@ -360,7 +364,7 @@ int main (int argc, char **argv) {
 	thread_info.iecmult = 2.0;
 	thread_info.outfd = NULL;
 
-	const char *optstring = "hqpji:d:f:V";
+	const char *optstring = "hqnpji:d:f:V";
 	struct option long_options[] = {
 		{ "help",     no_argument,       0, 'h' },
 		{ "json",     no_argument,       0, 'j' },
@@ -370,6 +374,7 @@ int main (int argc, char **argv) {
 		{ "peakhold", required_argument, 0, 'p' },
 		{ "quiet",    no_argument,       0, 'q' },
 		{ "version",  no_argument,       0, 'V' },
+		{ "newline",  no_argument,       0, 'n' },
 		{ 0, 0, 0, 0 }
 	};
 
@@ -390,6 +395,10 @@ int main (int argc, char **argv) {
 				break;
 			case 'p':
 				thread_info.format|=8;
+				break;
+			case 'n':
+				printf("newlined!\n");
+				thread_info.format|=16;
 				break;
 			case 'f':
 				if (thread_info.outfd) fclose(thread_info.outfd);
