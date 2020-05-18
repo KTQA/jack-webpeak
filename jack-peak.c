@@ -20,6 +20,7 @@
  * Copyright (C) 2001 Paul Davis
  * Copyright (C) 2003 Jack O'Quin
  * Copyright (C) 2008, 2012 Robin Gareus
+ * Copyright (C) 2020 Sam Mulvey
  *
  * compile with
  *   gcc -o jack-peak jack-peak.c -ljack -lm -lpthread
@@ -69,6 +70,9 @@ typedef struct _thread_info {
 } jack_thread_info_t;
 
 #define SAMPLESIZE (sizeof(jack_default_audio_sample_t))
+#define BUF_BYTES_PER_CHANNEL 8
+#define BUF_EXTRA 32 
+
 
 /* JACK data */
 jack_port_t **ports;
@@ -126,7 +130,14 @@ void * io_thread (void *arg) {
 	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
 	pthread_mutex_lock(&io_thread_lock);
 
+	char buffer[ (BUF_BYTES_PER_CHANNEL * info->channels) + BUF_EXTRA ]; // just... just let me have this.
+	int buf_pos = 0;
+
 	while (run) {
+
+		buffer[0] = '\0';
+		buf_pos = 0;
+		
 		const int pkhld = ceilf(2.0 / ( (info->delay/1000000.0) + ((float)info->buffersize / (float)info->samplerate)));
 
 		if (info->can_capture) {
@@ -141,7 +152,7 @@ void * io_thread (void *arg) {
 			switch (info->format&6) {
 				case 6:
 				case 4:
-					fprintf(info->outfd,"{\"cnt\":%d,\"peak\":[", info->channels);
+					buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos,"{\"cnt\":%d,\"peak\":[", info->channels);
 					break;
 				default:
 					break;
@@ -149,16 +160,16 @@ void * io_thread (void *arg) {
 			for (chn = 0; chn < info->channels; ++chn) {
 				switch (info->format&6) {
 					case 0:
-						fprintf(info->outfd, "%3.3f  ", info->peak[chn]); break;
+						buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos, "%3.3f  ", info->peak[chn]); break;
 					case 2:
-						fprintf(info->outfd,"%3d  ", peak_db(info->peak[chn], 1.0, info->iecmult)); break;
+						buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos,"%3d  ", peak_db(info->peak[chn], 1.0, info->iecmult)); break;
 					case 4:
-						fprintf(info->outfd, "%.3f", info->peak[chn]);
-						if (chn < info->channels - 1) fprintf(info->outfd,",");
+						buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos, "%.3f", info->peak[chn]);
+						if (chn < info->channels - 1) buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos,",");
 						break;
 					case 6:
-						fprintf(info->outfd,"%d", peak_db(info->peak[chn], 1.0, info->iecmult));
-						if (chn < info->channels - 1) fprintf(info->outfd,",");
+						buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos,"%d", peak_db(info->peak[chn], 1.0, info->iecmult));
+						if (chn < info->channels - 1) buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos,",");
 						break;
 				}
 
@@ -173,38 +184,40 @@ void * io_thread (void *arg) {
 			}
 			if (info->format&8) { // add peak-hold
 				if (info->format&4) {
-					fprintf(info->outfd,"],\"max\":[");
+					buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos,"],\"max\":[");
 				} else {
-					fprintf(info->outfd," | ");
+					buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos," | ");
 				}
 
 				for (chn = 0; chn < info->channels; ++chn) {
 					switch (info->format&6) {
 						case 0:
-							fprintf(info->outfd, "%3.3f  ", info->pmax[chn]); break;
+							buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos, "%3.3f  ", info->pmax[chn]); break;
 						case 2:
-							fprintf(info->outfd,"%3d  ", peak_db(info->pmax[chn], 1.0, info->iecmult)); break;
+							buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos,"%3d  ", peak_db(info->pmax[chn], 1.0, info->iecmult)); break;
 						case 4:
-							fprintf(info->outfd, "%.3f,", info->pmax[chn]); break;
+							buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos, "%.3f,", info->pmax[chn]); break;
 						case 6:
-							fprintf(info->outfd,"%d,", peak_db(info->pmax[chn], 1.0, info->iecmult)); break;
+							buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos,"%d,", peak_db(info->pmax[chn], 1.0, info->iecmult)); break;
 					}
 				}
 			}
 			switch (info->format&6) {
 				case 6:
 				case 4:
-					fprintf(info->outfd,"]}");
+					buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos,"]}");
 					break;
 				default:
 					break;
 			}
 
 			if (info->format & 16) {
-				fprintf(info->outfd, "\n");
+				buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos, "\n");
 			} else {
-				fprintf(info->outfd, "\r");
+				buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos, "\r");
 			}
+
+			fprintf(info->outfd, buffer);
 
 			if ( !(info->format & 1) ) {
 				ftruncate(fileno(info->outfd), ftell(info->outfd));
