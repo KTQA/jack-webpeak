@@ -56,7 +56,7 @@ typedef struct _thread_info {
 	float *pmax;
 	int   *ptme;
 	/* format - bitwise
-	 * 1  (1) -- on: file IO instead of stdout
+	 * 1  (1) -- on: FIXME use libwebsock
 	 * 2  (2) -- on: IEC-268 dB scale, off: linear float
 	 * 3  (4) -- on: JSON, off: plain text
 	 * 4  (8) -- include peak-hold
@@ -64,13 +64,12 @@ typedef struct _thread_info {
 	 */
 	int format;
 	float iecmult;
-	FILE *outfd;
 	volatile int can_capture;
 	volatile int can_process;
 } jack_thread_info_t;
 
 #define SAMPLESIZE (sizeof(jack_default_audio_sample_t))
-#define BUF_BYTES_PER_CHANNEL 8
+#define BUF_BYTES_PER_CHANNEL 16
 #define BUF_EXTRA 32 
 
 
@@ -145,10 +144,6 @@ void * io_thread (void *arg) {
 			memcpy(info->peak, info->pcur, sizeof(float)*info->channels);
 			for (chn = 0; chn < info->channels; ++chn) { info->pcur[chn]=0.0; }
 
-			if ((info->format&1)==0) {
-				if (flock(fileno(info->outfd), LOCK_EX)) continue; // pthread_cond_wait ?
-				fseek(info->outfd, 0L, SEEK_SET);
-			}
 			switch (info->format&6) {
 				case 6:
 				case 4:
@@ -217,14 +212,8 @@ void * io_thread (void *arg) {
 				buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos, "\r");
 			}
 
-			fprintf(info->outfd, buffer);
-
-			if ( !(info->format & 1) ) {
-				ftruncate(fileno(info->outfd), ftell(info->outfd));
-				flock(fileno(info->outfd), LOCK_UN);
-			}
-
-			fflush(info->outfd);
+			fprintf(stdout, buffer);
+			fflush(stdout);
 
 			if (info->delay>0) usleep(info->delay);
 		}
@@ -322,9 +311,6 @@ void setup_ports (int nports, char *source_names[], jack_thread_info_t *info) {
 /* main */
 
 void catchsig (int sig) {
-#ifndef _WIN32
-	signal(SIGHUP, catchsig); /* reset signal */
-#endif
 	if (!want_quiet)
 		fprintf(stderr,"\n CAUGHT SIGNAL - shutting down.\n");
 	run=0;
@@ -379,14 +365,12 @@ int main (int argc, char **argv) {
 	thread_info.delay = 100000;
 	thread_info.format = 0;
 	thread_info.iecmult = 2.0;
-	thread_info.outfd = NULL;
 
-	const char *optstring = "hqnpji:d:f:V";
+	const char *optstring = "hqnpji:d:V";
 	struct option long_options[] = {
 		{ "help",     no_argument,       0, 'h' },
 		{ "json",     no_argument,       0, 'j' },
 		{ "iec268",   required_argument, 0, 'i' },
-		{ "file",     required_argument, 0, 'f' },
 		{ "delay",    required_argument, 0, 'd' },
 		{ "peakhold", required_argument, 0, 'p' },
 		{ "quiet",    no_argument,       0, 'q' },
@@ -416,10 +400,6 @@ int main (int argc, char **argv) {
 			case 'n':
 				thread_info.format|=16;
 				break;
-			case 'f':
-				if (thread_info.outfd) fclose(thread_info.outfd);
-				thread_info.outfd = fopen(optarg, "w");
-				break;
 			case 'd':
 				if (atol(optarg) < 0 || atol(optarg) > 60000)
 					fprintf(stderr, "delay: time out of bounds.\n");
@@ -439,11 +419,6 @@ int main (int argc, char **argv) {
 				usage(argv[0], 0);
 				break;
 		}
-	}
-
-	if (!thread_info.outfd) {
-		thread_info.outfd=stdout;
-		thread_info.format|=1;
 	}
 
 	if (argc <= optind) {
@@ -473,9 +448,6 @@ int main (int argc, char **argv) {
 
 	/* set up i/o thread */
 	pthread_create(&thread_info.thread_id, NULL, io_thread, &thread_info);
-#ifndef _WIN32
-	signal (SIGHUP, catchsig);
-#endif
 	thread_info.samplerate = jack_get_sample_rate(thread_info.client);
 
 	if (!want_quiet) {
@@ -489,9 +461,6 @@ int main (int argc, char **argv) {
 	/* all systems go - run the i/o thread */
 	thread_info.can_capture = 1;
 	pthread_join(thread_info.thread_id, NULL);
-
-	if (thread_info.outfd != stdout)
-		fclose(thread_info.outfd);
 
 	jack_client_close(client);
 
