@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>jack-webpeak demo</title>
+	<link rel="stylesheet" href="static/style.css" type="text/css" media="all"/>
+	<script type="text/javascript" src="config.js"></script>
+	<script type="text/javascript" src="static/script.js"></script>
+</head>
+<body>
+
+<header>
+	<h1>Jack-WebPeak</h1>
+	<noscript>
+		<h2>HOLY CATS! THIS DOES NOT WORK AT ALL WITHOUT JAVASCRIPT!</h2>
+	</noscript>
+</header>
+
+<div class="make_go">
+	<button id="btn_peakrun"><img src="static/meter_on.png" alt="start" /></button>
+	<button id="btn_peakstop" class="active"><img src="static/meter_off.png" alt="stop" /></button>
+</div>
+<div class="meter_container">
+	<div id="meterbox"></div>
+</div>
+<h1>README.md</h1>
+<pre id="readme"></pre>
+
+<footer>
+	<a href="https://github.com/refutationalist/jack-webpeak">jack-webpeak</a>
+	&copy; 2020 Sam Mulvey, &copy; 2012 Robin Gareus
+	<a href="https://www.gnu.org/licenses/gpl-2.0.html">GPLv2</a>
+</footer>
+
+<!-- syntax highlighting is a thing. also, kinda just wanted to try this. -->
+<div id="meter_template">
+	<div class="meter" id="meterbg__THA_ID">
+		<img src="static/iec268-scale.png" alt=""/>
+		<div class="meterscale" id="peakmeter__THA_ID"></div>
+		<div class="meterpeak" id="maxmeter__THA_ID"></div>
+	</div>
+</div>
+
+</div>
+	
+</body>
+</html>

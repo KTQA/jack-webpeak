@@ -41,7 +41,7 @@
 
 
 #ifndef VERSION
-#define VERSION "0.8"
+#define VERSION "0.9"
 #endif
 
 typedef struct _jack_peaksock_thread_info {
@@ -428,7 +428,7 @@ void *websocket_thread() {
 	}
 
 
-	libwebsock_bind(lwctx, "localhost", port);
+	libwebsock_bind(lwctx, "127.0.0.1", port);
 	lwctx->onmessage = websocket_in;
 	lwctx->onopen = websocket_connect;
 	lwctx->onclose = websocket_disconnect;
@@ -554,7 +554,7 @@ int main (int argc, char **argv) {
 			(thread_info.channels>1)?"s":"",
 			thread_info.samplerate
 		);
-		if (lw_port != 0) fprintf(stderr, ", server @ ws://localhost:%d", lw_port);
+		if (lw_port != 0) fprintf(stderr, ", server @ ws://127.0.0.1:%d", lw_port);
 		fprintf(stderr, "\n");
 
 	}

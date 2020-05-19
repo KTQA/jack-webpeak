@@ -4,9 +4,13 @@
 }
 
 body {
+	
+	width: 60vw;
+	margin-left: 20vw;
+	font-size: 2vmin;
+
 	background:#404040;
 	color:#efe;
-	font-size:12px;
 	font-family: Arial, sans-serif;
 }
 
@@ -19,53 +23,54 @@ img {
 	border:0;
 }
 
-div.container {
-	width:50em;
-	margin:1em auto;
-}
-
-h1,h2 {
-	margin: .25em 0 .75em;
-}
-
-div.footer {
-	margin:.5em auto;
-	border-top: 1px dotted #888;
-	text-align:center;
-	color:#888;
-	width:55em;
-}
-
-.center {
-	text-align:center;
-}
-
-div.clearer {
-	clear:both;
-	height:0px;
-}
 
 button {
 	border-color:#666;
 	background-color:#888;
 }
 
-button[disabled]:active, button[disabled] {
+/* button[disabled]:active, button[disabled] { */
+button.active, button:active {
 	border-color:#404040;
 	border-style:inset;
 	background-color:#4d4d4d;
 }
 
-/* meterbox */
 
-div.meterbox {
-	min-height:20em;
-	padding-top:2em;
+h1,h2,div.make_go {
+	margin: 1.5vmin 0 .75vmin;
+	text-align: center;
+	clear: both;
 }
 
-div.meters {
-	margin: 0 auto;
-	overflow:hidden;
+
+footer {
+	margin:.25vmin auto;
+	border-top: 1px dotted #888;
+	text-align:center;
+	color:#888;
+}
+
+#readme {
+	white-space: break-spaces;
+}
+
+/* meterbox, essentially unchanged. */
+
+div#meter_template {
+	display: none;
+}
+
+div.meter_container {
+	position: relative;
+	left: 50%;
+	float: left;
+}
+
+div#meterbox {
+	   position: relative;
+   left: -50%;
+   float: left;
 }
 
 div.meter {
@@ -73,6 +78,7 @@ div.meter {
 	height:210px;
 	float:left;
 	position:relative;
+	background-color: #4d4d4d;
 }
 
 div.meter img {
@@ -100,7 +106,3 @@ div.meterpeak {
 	z-index:60;
 }
 
-div.doc {
-	font-size:90%;
-	color:#aaa;
-}

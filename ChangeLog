@@ -1,2 +1,6 @@
+2020-05-18  refulationalist <code@ktqa.org>
+    * removed file output mode
+    * added a websocket mode
+
 2012-05-18  rgareus  <robin@gareus.org>
 	* initial version
