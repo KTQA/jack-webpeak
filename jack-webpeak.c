@@ -1,7 +1,8 @@
-/** jack-peak - JACK audio peak server
+/** jack-webpeak - JACK audio peak server
  *
  * This tool is based on capture_client.c from the jackaudio.org examples
- * and modified by Robin Gareus <robin@gareus.org>
+ * and modified by Robin Gareus <robin@gareus.org>, further modified by
+ * Sam Mulvey <code@ktqa.org> to fit in with modern web standards.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -22,8 +23,6 @@
  * Copyright (C) 2008, 2012 Robin Gareus
  * Copyright (C) 2020 Sam Mulvey
  *
- * compile with
- *   gcc -o jack-peak jack-peak.c -ljack -lm -lpthread
  */
 
 #include <stdio.h>
@@ -37,13 +36,15 @@
 #include <math.h>
 #include <errno.h>
 #include <jack/jack.h>
-#include <sys/file.h>
+#include <websock/websock.h>
+
+
 
 #ifndef VERSION
 #define VERSION "0.8"
 #endif
 
-typedef struct _thread_info {
+typedef struct _jack_peaksock_thread_info {
 	pthread_t thread_id;
 	pthread_t mesg_thread_id;
 	jack_nframes_t samplerate;
@@ -56,21 +57,20 @@ typedef struct _thread_info {
 	float *pmax;
 	int   *ptme;
 	/* format - bitwise
-	 * 1  (1) -- on: FIXME use libwebsock
-	 * 2  (2) -- on: IEC-268 dB scale, off: linear float
-	 * 3  (4) -- on: JSON, off: plain text
-	 * 4  (8) -- include peak-hold
-	 * 5 (16) -- on: print newline, off: print cr
+ 	 * 1 -- on: use libwebsock
+ 	 * 2 -- on: IEC-268 dB scale, off: linear float
+ 	 * 4 -- on: JSON, off: plain text
+ 	 * 8 -- include peak-hold
 	 */
 	int format;
 	float iecmult;
 	volatile int can_capture;
 	volatile int can_process;
-} jack_thread_info_t;
+	} jack_thread_info_t;
 
 #define SAMPLESIZE (sizeof(jack_default_audio_sample_t))
 #define BUF_BYTES_PER_CHANNEL 16
-#define BUF_EXTRA 32 
+#define BUF_EXTRA 32
 
 
 /* JACK data */
@@ -86,6 +86,11 @@ pthread_cond_t  data_ready = PTHREAD_COND_INITIALIZER;
 int want_quiet = 0;
 volatile int run = 1;
 
+/* websocket stuff */
+libwebsock_context* lwctx;
+pthread_t lw_wait_thread;
+int lw_port = 0;
+
 void cleanup(jack_thread_info_t *info) {
 	free(info->peak);
 	free(info->pcur);
@@ -97,26 +102,27 @@ void cleanup(jack_thread_info_t *info) {
 /* output functions and helpers */
 
 float iec_scale(float db) {
-	 float def = 0.0f;
+	float def = 0.0f;
 
-	 if (db < -70.0f) {
-		 def = 0.0f;
-	 } else if (db < -60.0f) {
-		 def = (db + 70.0f) * 0.25f;
-	 } else if (db < -50.0f) {
-		 def = (db + 60.0f) * 0.5f + 2.5f;
-	 } else if (db < -40.0f) {
-		 def = (db + 50.0f) * 0.75f + 7.5;
-	 } else if (db < -30.0f) {
-		 def = (db + 40.0f) * 1.5f + 15.0f;
-	 } else if (db < -20.0f) {
-		 def = (db + 30.0f) * 2.0f + 30.0f;
-	 } else if (db < 0.0f) {
-		 def = (db + 20.0f) * 2.5f + 50.0f;
-	 } else {
-		 def = 100.0f;
-	 }
-	 return def;
+	if (db < -70.0f) {
+		def = 0.0f;
+	} else if (db < -60.0f) {
+		def = (db + 70.0f) * 0.25f;
+	} else if (db < -50.0f) {
+		def = (db + 60.0f) * 0.5f + 2.5f;
+	} else if (db < -40.0f) {
+		def = (db + 50.0f) * 0.75f + 7.5;
+	} else if (db < -30.0f) {
+		def = (db + 40.0f) * 1.5f + 15.0f;
+	} else if (db < -20.0f) {
+		def = (db + 30.0f) * 2.0f + 30.0f;
+	} else if (db < 0.0f) {
+		def = (db + 20.0f) * 2.5f + 50.0f;
+	} else {
+		def = 100.0f;
+	}
+	return def;
+
 }
 
 int peak_db(float peak, float bias, float mult) {
@@ -130,44 +136,47 @@ void * io_thread (void *arg) {
 	pthread_mutex_lock(&io_thread_lock);
 
 	char buffer[ (BUF_BYTES_PER_CHANNEL * info->channels) + BUF_EXTRA ]; // just... just let me have this.
-	int buf_pos = 0;
 
 	while (run) {
 
-		buffer[0] = '\0';
-		buf_pos = 0;
-		
 		const int pkhld = ceilf(2.0 / ( (info->delay/1000000.0) + ((float)info->buffersize / (float)info->samplerate)));
 
 		if (info->can_capture) {
 			int chn;
-			memcpy(info->peak, info->pcur, sizeof(float)*info->channels);
-			for (chn = 0; chn < info->channels; ++chn) { info->pcur[chn]=0.0; }
+			int buf_pos = 0;
 
-			switch (info->format&6) {
-				case 6:
-				case 4:
-					buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos,"{\"cnt\":%d,\"peak\":[", info->channels);
-					break;
-				default:
-					break;
-			}
+			memcpy(info->peak, info->pcur, sizeof(float)*info->channels);
+
+
+			// json header
+			if (info->format & 4) buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos,"{\"cnt\":%d,\"peak\":[", info->channels);
+
+
+
 			for (chn = 0; chn < info->channels; ++chn) {
-				switch (info->format&6) {
-					case 0:
-						buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos, "%3.3f  ", info->peak[chn]); break;
-					case 2:
-						buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos,"%3d  ", peak_db(info->peak[chn], 1.0, info->iecmult)); break;
-					case 4:
+				info->pcur[chn]=0.0;
+
+				switch (info->format & 6) {
+					case 0: // raw formatting
+						buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos, "%3.3f  ", info->peak[chn]);
+						break;
+
+					case 2: // IEC-268, raw
+						buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos,"%3d  ", peak_db(info->peak[chn], 1.0, info->iecmult));
+						break;
+
+					case 4: // raw, JSON
 						buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos, "%.3f", info->peak[chn]);
 						if (chn < info->channels - 1) buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos,",");
 						break;
-					case 6:
-						buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos,"%d", peak_db(info->peak[chn], 1.0, info->iecmult));
+
+					case 6: // IEC-268, JSON
+						buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos, "%d", peak_db(info->peak[chn], 1.0, info->iecmult));
 						if (chn < info->channels - 1) buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos,",");
 						break;
 				}
 
+				// manage peak hold
 				if (info->peak[chn] > info->pmax[chn]) {
 					info->pmax[chn] = info->peak[chn];
 					info->ptme[chn] = 0;
@@ -176,44 +185,64 @@ void * io_thread (void *arg) {
 				} else {
 					info->pmax[chn] = info->peak[chn];
 				}
-			}
-			if (info->format&8) { // add peak-hold
-				if (info->format&4) {
-					buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos,"],\"max\":[");
-				} else {
-					buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos," | ");
-				}
 
+
+			}
+
+			// display peak hold
+			if (info->format & 8) {
+
+				// my momma told me this was faster
+				buf_pos += snprintf(
+					buffer+buf_pos,
+					sizeof(buffer)-buf_pos,
+					( (info->format & 4) ? "],\"max\":["  : " | " ) // JSON interstitial or just some junk
+				);
+
+				// As above, so below.
 				for (chn = 0; chn < info->channels; ++chn) {
-					switch (info->format&6) {
-						case 0:
-							buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos, "%3.3f  ", info->pmax[chn]); break;
-						case 2:
-							buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos,"%3d  ", peak_db(info->pmax[chn], 1.0, info->iecmult)); break;
-						case 4:
-							buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos, "%.3f,", info->pmax[chn]); break;
-						case 6:
-							buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos,"%d,", peak_db(info->pmax[chn], 1.0, info->iecmult)); break;
+					switch (info->format & 6) {
+						case 0: // raw formatting
+							buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos, "%3.3f  ", info->pmax[chn]);
+							break;
+
+						case 2: // IEC-268, raw
+							buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos,"%3d  ", peak_db(info->pmax[chn], 1.0, info->iecmult));
+							break;
+
+						case 4: // raw, JSON
+							buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos, "%.3f", info->pmax[chn]);
+							if (chn < info->channels - 1) buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos,",");
+							break;
+
+						case 6: // IEC-268, JSON
+							buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos, "%d", peak_db(info->pmax[chn], 1.0, info->iecmult));
+							if (chn < info->channels - 1) buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos,",");
+							break;
+
 					}
 				}
-			}
-			switch (info->format&6) {
-				case 6:
-				case 4:
-					buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos,"]}");
-					break;
-				default:
-					break;
-			}
+			} // end display peak hold
 
-			if (info->format & 16) {
-				buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos, "\n");
+			// JSON footer, if ya need it.
+			if (info->format & 4) buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos,"]}");
+
+
+			if (info->format & 1) {
+				//websocket, is always \r\n
+				buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos, "\r\n");
+				libwebsock_send_all_text(lwctx, buffer);
 			} else {
-				buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos, "\r");
-			}
 
-			fprintf(stdout, buffer);
-			fflush(stdout);
+				if (isatty(fileno(stdout))) { // are we a tty, then just CR to save space.
+					buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos, "\r");
+				} else { // otherwise, we're output to a file, so newline.
+					buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos, "\n");
+				}
+
+				fprintf(stdout, buffer);
+				fflush(stdout);
+			}
 
 			if (info->delay>0) usleep(info->delay);
 		}
@@ -231,7 +260,7 @@ int jack_bufsiz_cb(jack_nframes_t nframes, void *arg) {
 	info->buffersize=nframes;
 	return 0;
 }
-	
+
 int process (jack_nframes_t nframes, void *arg) {
 	int chn;
 	size_t i;
@@ -253,8 +282,8 @@ int process (jack_nframes_t nframes, void *arg) {
 
 	/* Tell the io thread there is work to do. */
 	if (pthread_mutex_trylock(&io_thread_lock) == 0) {
-	    pthread_cond_signal(&data_ready);
-	    pthread_mutex_unlock(&io_thread_lock);
+		pthread_cond_signal(&data_ready);
+		pthread_mutex_unlock(&io_thread_lock);
 	}
 	return 0;
 }
@@ -284,7 +313,7 @@ void setup_ports (int nports, char *source_names[], jack_thread_info_t *info) {
 		info->pcur[i]=0.0;
 		info->ptme[i]=0;
 
-		sprintf(name, "input%d", i+1);
+		sprintf(name, "input_%d", i+1);
 
 		if ((ports[i] = jack_port_register(info->client, name, JACK_DEFAULT_AUDIO_TYPE, JackPortIsInput, 0)) == 0) {
 			fprintf(stderr, "cannot register input port \"%s\"!\n", name);
@@ -297,10 +326,6 @@ void setup_ports (int nports, char *source_names[], jack_thread_info_t *info) {
 	for (i = 0; i < nports; i++) {
 		if (jack_connect(info->client, source_names[i], jack_port_name(ports[i]))) {
 			fprintf(stderr, "cannot connect input port %s to %s\n", jack_port_name(ports[i]), source_names[i]);
-#if 0 /* not fatal - connect manually */
-			jack_client_close(info->client);
-			exit(1);
-#endif
 		}
 	}
 
@@ -308,11 +333,10 @@ void setup_ports (int nports, char *source_names[], jack_thread_info_t *info) {
 	info->can_process = 1;
 }
 
-/* main */
 
 void catchsig (int sig) {
 	if (!want_quiet)
-		fprintf(stderr,"\n CAUGHT SIGNAL - shutting down.\n");
+		fprintf(stderr,"\nCAUGHT SIGNAL - shutting down.\n");
 	run=0;
 	/* signal writer thread */
 	pthread_mutex_lock(&io_thread_lock);
@@ -322,43 +346,109 @@ void catchsig (int sig) {
 
 
 static void usage (char *name, int status) {
-  fprintf (status?stderr:stdout,
-			"%s - live peak-signal meter for JACK\n", basename(name));
-  fprintf (status?stderr:stdout,
-"Utility to write audio peak data to stdout of file as plain text of JSON data.\n"
-"\n"
-	);
-	fprintf(status?stderr:stdout,
-			"Usage: %s [ OPTIONS ] port1 [ port2 ... ]\n\n", name);
-	fprintf(status?stderr:stdout,
-"Options:\n"
-"  -d, --delay <int>        output speed in miliseconds (default 100ms)\n"
-"                           a delay of zero writes at jack-period intervals\n"
-"  -f, --file <path>        write to file instead of stdout\n"
-"  -h, --help               print this message\n"
-"  -i, --iec268 <mult>      use dB scale; output range 0-<mult> (integer)\n"
-"                           - if not specified, output range is linear [0..1]\n"
-"  -j, --json               write JSON format instead of plain text\n"
-"  -p, --peakhold           add peak-hold information.\n"
-"  -q, --quiet              inhibit usual output\n"
-"  -n, --newline            force newline\n"
-"\n"
-"Examples:\n"
-"jack-peak system:capture_1 system:capture_2\n"
-"\n"
-"jack-peak --iec268 200 --json --file /tmp/peaks.json system:capture_1\n"
-"\n"
-"Report bugs to <robin@gareus.org>.\n"
-"Website and manual: <http://gareus.org/oss/jack_peak>\n"
+	FILE *place = status ? stderr : stdout;
+
+	fprintf(place, "%s - live peak/signal meter for JACK\n", basename(name));
+	fprintf(place, "Utility to write audio peak to stdout or via websocket\n\n");
+	fprintf(place, "Usage: %s [ OPTIONS ] port1 [ port2 ... ]\n\n", name);
+
+	fprintf(place,
+		"Options:\n"
+		"  -n, --name <name>        name in JACK patchbay\n"
+		"  -w, --websocket <port>   start localhost websocket server on port\n"
+		"  -d, --delay <int>        output speed in miliseconds (default 100ms)\n"
+		"                           a delay of zero writes at jack-period intervals\n"
+		"  -h, --help               print this message\n"
+		"  -i, --iec268 <mult>      use dB scale; output range 0-<mult> (integer)\n"
+		"                           - if not specified, output range is linear [0..1]\n"
+		"  -j, --json               write JSON format instead of plain text\n"
+		"  -p, --peakhold           add peak-hold information.\n"
+		"  -q, --quiet              inhibit usual output\n"
+		"  -v, --version            print version information\n"
+		"\n"
+		"Examples:\n"
+		"jack-webpeak system:capture_1 system:capture_2\n"
+		"\n"
+		"jack-webpeak --websocket 8000 --iec268 200 --json  system:capture_1\n"
+		"\n"
+		"Report bugs to <code@ktqa.org>.\n"
+		"Website and manual: <https://github.com/refutationalist/jack-webpeak>\n"
 	);
 	exit(status);
 }
+
+static void version(char *name) {
+	printf(
+		"%s %s\n\n"
+		"Copyright (C) 2020 Sam Mulvey <code@ktqa.org>\n"
+		"This is free software; see the source for copying conditions.  There is NO\n"
+		"warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\n",
+		name,
+		VERSION
+	);
+	exit(0);
+
+}
+
+uint16_t websocket_getport(int fd) {
+	struct sockaddr_in addr;
+	socklen_t addr_size = sizeof(struct sockaddr_in);
+	if (getpeername(fd, (struct sockaddr *)&addr, &addr_size) == 0) {
+		return ntohs(addr.sin_port);
+	} else {
+		return 0;
+	}
+}
+
+int websocket_connect(libwebsock_client_state *state) {
+	if (!want_quiet) fprintf(stderr, "websocket connection from port %d\n", websocket_getport(state->sockfd));
+	return 0;
+}
+
+int websocket_disconnect(libwebsock_client_state *state) {
+	if (!want_quiet) fprintf(stderr, "websocket disconnection from port %d\n", websocket_getport(state->sockfd));
+	return 0;
+}
+
+int websocket_in(libwebsock_client_state *state, libwebsock_message *msg) {
+	if (!want_quiet) fprintf(stderr, "incoming garbage from port %d\n", websocket_getport(state->sockfd));
+	return 0;
+}
+
+void *websocket_thread() {
+	if (lw_port == 0) return NULL;
+
+	char port[8];
+	sprintf(port, "%d", lw_port);
+	lwctx = libwebsock_init(NULL, NULL, 1024);
+
+	if (lwctx == NULL) {
+		fprintf(stderr, "error: couldn't init websocket server\n");
+		exit(1);
+	}
+
+
+	libwebsock_bind(lwctx, "localhost", port);
+	lwctx->onmessage = websocket_in;
+	lwctx->onopen = websocket_connect;
+	lwctx->onclose = websocket_disconnect;
+	libwebsock_wait(lwctx);
+
+	/* libwebsock captures SIGINT via libevent, so if we get to this point, it's because
+ 	 * we got one of those.   Send it up the line and then peace out.
+ 	 * FIXME find a better way to do this.
+ 	 */
+	catchsig(SIGINT);
+	return NULL;
+}
+
 
 int main (int argc, char **argv) {
 	jack_client_t *client;
 	jack_thread_info_t thread_info;
 	jack_status_t jstat;
 	int c;
+	char jackname[33] = "jackpeak";
 
 	memset(&thread_info, 0, sizeof(thread_info));
 	thread_info.channels = 2;
@@ -366,16 +456,17 @@ int main (int argc, char **argv) {
 	thread_info.format = 0;
 	thread_info.iecmult = 2.0;
 
-	const char *optstring = "hqnpji:d:V";
+	const char *optstring = "hqn:pji:d:w:v";
 	struct option long_options[] = {
-		{ "help",     no_argument,       0, 'h' },
-		{ "json",     no_argument,       0, 'j' },
-		{ "iec268",   required_argument, 0, 'i' },
-		{ "delay",    required_argument, 0, 'd' },
-		{ "peakhold", required_argument, 0, 'p' },
-		{ "quiet",    no_argument,       0, 'q' },
-		{ "version",  no_argument,       0, 'V' },
-		{ "newline",  no_argument,       0, 'n' },
+		{ "help",      no_argument,       0, 'h' },
+		{ "json",      no_argument,       0, 'j' },
+		{ "iec268",    required_argument, 0, 'i' },
+		{ "delay",     required_argument, 0, 'd' },
+		{ "peakhold",  required_argument, 0, 'p' },
+		{ "quiet",     no_argument,       0, 'q' },
+		{ "version",   no_argument,       0, 'v' },
+		{ "name",      required_argument, 0, 'n' },
+		{ "websocket", required_argument, 0, 'w' },
 		{ 0, 0, 0, 0 }
 	};
 
@@ -398,7 +489,7 @@ int main (int argc, char **argv) {
 				thread_info.format|=8;
 				break;
 			case 'n':
-				thread_info.format|=16;
+				strncpy(jackname, optarg, sizeof(jackname) - 1);
 				break;
 			case 'd':
 				if (atol(optarg) < 0 || atol(optarg) > 60000)
@@ -406,13 +497,17 @@ int main (int argc, char **argv) {
 				else
 					thread_info.delay = 1000*atol(optarg);
 				break;
-			case 'V':
-				printf ("%s %s\n\n",argv[0], VERSION);
-				printf(
-"Copyright (C) 2012 Robin Gareus <robin@gareus.org>\n"
-"This is free software; see the source for copying conditions.  There is NO\n"
-"warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\n"
-);
+			case 'v':
+				version(argv[0]);
+				break;
+			case 'w':
+				if (atoi(optarg) < 1024 || atoi(optarg) > 65535) {
+					fprintf(stderr, "websocket: bad port.  pick between 1024 and 65535.\n");
+					exit(1);
+				} else {
+					lw_port = atoi(optarg);
+					thread_info.format|=1;
+				}
 				break;
 			default:
 				fprintf(stderr, "invalid argument.\n");
@@ -427,7 +522,7 @@ int main (int argc, char **argv) {
 	}
 
 	/* set up JACK client */
-	if ((client = jack_client_open("jackpeak", JackNoStartServer, &jstat)) == 0) {
+	if ((client = jack_client_open(jackname, JackNoStartServer, &jstat)) == 0) {
 		fprintf(stderr, "Can not connect to JACK.\n");
 		exit(1);
 	}
@@ -446,24 +541,30 @@ int main (int argc, char **argv) {
 
 	setup_ports(thread_info.channels, &argv[optind], &thread_info);
 
+	signal(SIGINT, catchsig);
+	signal(SIGPIPE, catchsig);
+
 	/* set up i/o thread */
 	pthread_create(&thread_info.thread_id, NULL, io_thread, &thread_info);
 	thread_info.samplerate = jack_get_sample_rate(thread_info.client);
 
 	if (!want_quiet) {
-		fprintf(stderr, "%i channel%s, @%iSPS.\n",
+		fprintf(stderr, "%i channel%s, @%iSPS",
 			thread_info.channels,
 			(thread_info.channels>1)?"s":"",
 			thread_info.samplerate
 		);
+		if (lw_port != 0) fprintf(stderr, ", server @ ws://localhost:%d", lw_port);
+		fprintf(stderr, "\n");
+
 	}
 
 	/* all systems go - run the i/o thread */
+	if (lw_port != 0) pthread_create(&lw_wait_thread, NULL, websocket_thread, NULL);
 	thread_info.can_capture = 1;
+
 	pthread_join(thread_info.thread_id, NULL);
-
 	jack_client_close(client);
-
 	cleanup(&thread_info);
 
 	return(0);
