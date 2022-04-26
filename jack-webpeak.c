@@ -36,8 +36,7 @@
 #include <math.h>
 #include <errno.h>
 #include <jack/jack.h>
-#include <websock/websock.h>
-
+#include <ws.h>
 
 
 #ifndef VERSION
@@ -66,7 +65,7 @@ typedef struct _jack_peaksock_thread_info {
 	float iecmult;
 	volatile int can_capture;
 	volatile int can_process;
-	} jack_thread_info_t;
+} jack_thread_info_t;
 
 #define SAMPLESIZE (sizeof(jack_default_audio_sample_t))
 #define BUF_BYTES_PER_CHANNEL 16
@@ -87,8 +86,6 @@ int want_quiet = 0;
 volatile int run = 1;
 
 /* websocket stuff */
-libwebsock_context* lwctx;
-pthread_t lw_wait_thread;
 int lw_port = 0;
 
 void cleanup(jack_thread_info_t *info) {
@@ -231,7 +228,7 @@ void * io_thread (void *arg) {
 			if (info->format & 1) {
 				//websocket, is always \r\n
 				buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos, "\r\n");
-				libwebsock_send_all_text(lwctx, buffer);
+				ws_sendframe_txt(NULL, buffer);
 			} else {
 
 				if (isatty(fileno(stdout))) { // are we a tty, then just CR to save space.
@@ -390,58 +387,17 @@ static void version(char *name) {
 
 }
 
-uint16_t websocket_getport(int fd) {
-	struct sockaddr_in addr;
-	socklen_t addr_size = sizeof(struct sockaddr_in);
-	if (getpeername(fd, (struct sockaddr *)&addr, &addr_size) == 0) {
-		return ntohs(addr.sin_port);
-	} else {
-		return 0;
-	}
+void websocket_connect(ws_cli_conn_t *client) {
+	if (!want_quiet) fprintf(stderr, "websocket connected\n");
 }
 
-int websocket_connect(libwebsock_client_state *state) {
-	if (!want_quiet) fprintf(stderr, "websocket connection from port %d\n", websocket_getport(state->sockfd));
-	return 0;
+void websocket_disconnect(ws_cli_conn_t *client) {
+	if (!want_quiet) fprintf(stderr, "websocket disconnected\n");
 }
 
-int websocket_disconnect(libwebsock_client_state *state) {
-	if (!want_quiet) fprintf(stderr, "websocket disconnection from port %d\n", websocket_getport(state->sockfd));
-	return 0;
+void websocket_in(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, int type) {
+	if (!want_quiet) fprintf(stderr, "incoming garbage from websocket client\n");
 }
-
-int websocket_in(libwebsock_client_state *state, libwebsock_message *msg) {
-	if (!want_quiet) fprintf(stderr, "incoming garbage from port %d\n", websocket_getport(state->sockfd));
-	return 0;
-}
-
-void *websocket_thread() {
-	if (lw_port == 0) return NULL;
-
-	char port[8];
-	sprintf(port, "%d", lw_port);
-	lwctx = libwebsock_init(NULL, NULL, 1024);
-
-	if (lwctx == NULL) {
-		fprintf(stderr, "error: couldn't init websocket server\n");
-		exit(1);
-	}
-
-
-	libwebsock_bind(lwctx, "127.0.0.1", port);
-	lwctx->onmessage = websocket_in;
-	lwctx->onopen = websocket_connect;
-	lwctx->onclose = websocket_disconnect;
-	libwebsock_wait(lwctx);
-
-	/* libwebsock captures SIGINT via libevent, so if we get to this point, it's because
- 	 * we got one of those.   Send it up the line and then peace out.
- 	 * FIXME find a better way to do this.
- 	 */
-	catchsig(SIGINT);
-	return NULL;
-}
-
 
 int main (int argc, char **argv) {
 	jack_client_t *client;
@@ -560,7 +516,15 @@ int main (int argc, char **argv) {
 	}
 
 	/* all systems go - run the i/o thread */
-	if (lw_port != 0) pthread_create(&lw_wait_thread, NULL, websocket_thread, NULL);
+	if (lw_port != 0) {
+		struct ws_events wse;
+		wse.onopen    = &websocket_connect;
+		wse.onclose   = &websocket_disconnect;
+		wse.onmessage = &websocket_in;
+		ws_socket(&wse, lw_port, 1);
+	}
+
+
 	thread_info.can_capture = 1;
 
 	pthread_join(thread_info.thread_id, NULL);

@@ -1,8 +1,8 @@
 # override e.g. `make install PREFIX=/usr`
 PREFIX ?= /usr/local
 
-CFLAGS=-Wall `pkg-config --cflags jack` -O3
-LIBS=`pkg-config --libs jack` -lpthread -lm -lwebsock
+CFLAGS=-Wall `pkg-config --cflags jack` `pkg-config --cflags wsserver` -O3
+LIBS=`pkg-config --libs jack` `pkg-config --libs wsserver` -lpthread -lm 
 #compat w/ NetBSD and GNU Make
 LDADD=${LIBS}
 LDLIBS=${LIBS}
