@@ -9,7 +9,7 @@ Then a web-based meter went from "neat" to "pretty much necessary" and I had to 
 
 After looking around and trying to *make really sure* no one else had already solved this problem, I did some poking around on websocket libraries, dusted the code off, and knocked this out.   It is clearly a work in progress.
 
-In addition to [JACK](https://jackaudio.org), it requires [libwebsock](https://github.com/JonnyWhatshisface/libwebsock) because it ~is the best solution~required me to think the least.
+In addition to [JACK](https://jackaudio.org), it requires [wsServer](https://github.com/Theldus/wsServer) because it ~is the best solution~required me to think the least.
 
 ### How To Use #####
 
