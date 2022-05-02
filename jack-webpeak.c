@@ -56,20 +56,22 @@ typedef struct _jack_peaksock_thread_info {
 	float *pmax;
 	int   *ptme;
 	/* format - bitwise
- 	 * 1 -- on: use libwebsock
- 	 * 2 -- on: IEC-268 dB scale, off: linear float
- 	 * 4 -- on: JSON, off: plain text
- 	 * 8 -- include peak-hold
+ 	 * 1  -- on: use libwebsock
+ 	 * 2  -- on: IEC-268 dB scale, off: linear float
+ 	 * 4  -- on: JSON, off: plain text
+ 	 * 8  -- include peak-hold
+ 	 * 16 -- include xruns
 	 */
 	int format;
 	float iecmult;
+	int xruns;
 	volatile int can_capture;
 	volatile int can_process;
 } jack_thread_info_t;
 
 #define SAMPLESIZE (sizeof(jack_default_audio_sample_t))
 #define BUF_BYTES_PER_CHANNEL 16
-#define BUF_EXTRA 32
+#define BUF_EXTRA 64
 
 
 /* JACK data */
@@ -222,7 +224,18 @@ void * io_thread (void *arg) {
 			} // end display peak hold
 
 			// JSON footer, if ya need it.
-			if (info->format & 4) buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos,"]}");
+			if (info->format & 4) buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos,"]");
+
+			if (info->format & 16) {
+				if (info->format & 4) {
+					buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos, ",\"xruns\":%d", info->xruns);
+				} else {
+					buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos, " XRUNS: %d", info->xruns);
+				}
+			}
+
+
+			if (info->format & 4) buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos,"}");
 
 
 			if (info->format & 1) {
@@ -255,6 +268,14 @@ void * io_thread (void *arg) {
 int jack_bufsiz_cb(jack_nframes_t nframes, void *arg) {
 	jack_thread_info_t *info = (jack_thread_info_t *) arg;
 	info->buffersize=nframes;
+	return 0;
+}
+
+int jack_xrun_cb(void *arg) {
+	jack_thread_info_t *info = (jack_thread_info_t *) arg;
+	pthread_mutex_lock(&io_thread_lock);
+	info->xruns++;
+	pthread_mutex_unlock(&io_thread_lock);
 	return 0;
 }
 
@@ -359,7 +380,8 @@ static void usage (char *name, int status) {
 		"  -i, --iec268 <mult>      use dB scale; output range 0-<mult> (integer)\n"
 		"                           - if not specified, output range is linear [0..1]\n"
 		"  -j, --json               write JSON format instead of plain text\n"
-		"  -p, --peakhold           add peak-hold information.\n"
+		"  -p, --peakhold           add peak-hold information\n"
+		"  -x, --xruns              include xruns count\n"
 		"  -q, --quiet              inhibit usual output\n"
 		"  -v, --version            print version information\n"
 		"\n"
@@ -411,8 +433,9 @@ int main (int argc, char **argv) {
 	thread_info.delay = 100000;
 	thread_info.format = 0;
 	thread_info.iecmult = 2.0;
+	thread_info.xruns = 0;
 
-	const char *optstring = "hqn:pji:d:w:v";
+	const char *optstring = "hqn:pji:d:w:vx";
 	struct option long_options[] = {
 		{ "help",      no_argument,       0, 'h' },
 		{ "json",      no_argument,       0, 'j' },
@@ -421,6 +444,7 @@ int main (int argc, char **argv) {
 		{ "peakhold",  required_argument, 0, 'p' },
 		{ "quiet",     no_argument,       0, 'q' },
 		{ "version",   no_argument,       0, 'v' },
+		{ "xruns",     no_argument,       0, 'x' },
 		{ "name",      required_argument, 0, 'n' },
 		{ "websocket", required_argument, 0, 'w' },
 		{ 0, 0, 0, 0 }
@@ -443,6 +467,9 @@ int main (int argc, char **argv) {
 				break;
 			case 'p':
 				thread_info.format|=8;
+				break;
+			case 'x':
+				thread_info.format|=16;
 				break;
 			case 'n':
 				strncpy(jackname, optarg, sizeof(jackname) - 1);
@@ -490,6 +517,7 @@ int main (int argc, char **argv) {
 	jack_set_process_callback(client, process, &thread_info);
 	jack_on_shutdown(client, jack_shutdown, &thread_info);
 	jack_set_buffer_size_callback(client, jack_bufsiz_cb, &thread_info);
+	jack_set_xrun_callback(client, jack_xrun_cb, &thread_info);
 
 	if (jack_activate(client)) {
 		fprintf(stderr, "cannot activate client");
@@ -521,7 +549,7 @@ int main (int argc, char **argv) {
 		wse.onopen    = &websocket_connect;
 		wse.onclose   = &websocket_disconnect;
 		wse.onmessage = &websocket_in;
-		ws_socket(&wse, lw_port, 1);
+		ws_socket(&wse, lw_port, 1, 0);
 	}
 
 
