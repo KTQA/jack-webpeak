@@ -87,9 +87,6 @@ pthread_cond_t  data_ready = PTHREAD_COND_INITIALIZER;
 int want_quiet = 0;
 volatile int run = 1;
 
-/* websocket stuff */
-int lw_port = 0;
-
 void cleanup(jack_thread_info_t *info) {
 	free(info->peak);
 	free(info->pcur);
@@ -410,11 +407,11 @@ static void version(char *name) {
 }
 
 void websocket_connect(ws_cli_conn_t *client) {
-	if (!want_quiet) fprintf(stderr, "websocket connected\n");
+	if (!want_quiet) fprintf(stderr, "websocket connected from port %s\n", ws_getport(client));
 }
 
 void websocket_disconnect(ws_cli_conn_t *client) {
-	if (!want_quiet) fprintf(stderr, "websocket disconnected\n");
+	if (!want_quiet) fprintf(stderr, "websocket disconnected from port %s\n", ws_getport(client));
 }
 
 void websocket_in(ws_cli_conn_t *client, const unsigned char *msg, uint64_t size, int type) {
@@ -427,6 +424,7 @@ int main (int argc, char **argv) {
 	jack_status_t jstat;
 	int c;
 	char jackname[33] = "jackpeak";
+	char *lw_port = NULL;
 
 	memset(&thread_info, 0, sizeof(thread_info));
 	thread_info.channels = 2;
@@ -488,7 +486,7 @@ int main (int argc, char **argv) {
 					fprintf(stderr, "websocket: bad port.  pick between 1024 and 65535.\n");
 					exit(1);
 				} else {
-					lw_port = atoi(optarg);
+					lw_port = optarg;
 					thread_info.format|=1;
 				}
 				break;
@@ -538,7 +536,7 @@ int main (int argc, char **argv) {
 			(thread_info.channels>1)?"s":"",
 			thread_info.samplerate
 		);
-		if (lw_port != 0) fprintf(stderr, ", server @ ws://127.0.0.1:%d", lw_port);
+		if (lw_port != 0) fprintf(stderr, ", server @ ws://localhost:%s", lw_port);
 		fprintf(stderr, "\n");
 
 	}
@@ -549,7 +547,7 @@ int main (int argc, char **argv) {
 		wse.onopen    = &websocket_connect;
 		wse.onclose   = &websocket_disconnect;
 		wse.onmessage = &websocket_in;
-		ws_socket(&wse, lw_port, 1, 0);
+		ws_socket(&wse, "localhost", lw_port, 1, 0);
 	}
 
 
