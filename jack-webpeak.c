@@ -84,7 +84,7 @@ pthread_mutex_t io_thread_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t  data_ready = PTHREAD_COND_INITIALIZER;
 
 /* global options/status */
-int want_quiet = 0;
+int wsport = 0, want_quiet = 0, xrun_count = 0;
 volatile int run = 1;
 
 void cleanup(jack_thread_info_t *info) {
@@ -92,7 +92,8 @@ void cleanup(jack_thread_info_t *info) {
 	free(info->pcur);
 	free(info->pmax);
 	free(info->ptme);
-	free(in); free(ports);
+	free(in);
+	free(ports);
 }
 
 /* output functions and helpers */
@@ -225,9 +226,9 @@ void * io_thread (void *arg) {
 
 			if (info->format & 16) {
 				if (info->format & 4) {
-					buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos, ",\"xruns\":%d", info->xruns);
+					buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos, ",\"xruns\":%d", xrun_count);
 				} else {
-					buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos, " XRUNS: %d", info->xruns);
+					buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos, " XRUNS: %d", xrun_count);
 				}
 			}
 
@@ -238,7 +239,7 @@ void * io_thread (void *arg) {
 			if (info->format & 1) {
 				//websocket, is always \r\n
 				buf_pos += snprintf(buffer+buf_pos, sizeof(buffer)-buf_pos, "\r\n");
-				ws_sendframe_txt(NULL, buffer);
+				ws_sendframe_txt_bcast(wsport, buffer);
 			} else {
 
 				if (isatty(fileno(stdout))) { // are we a tty, then just CR to save space.
@@ -269,11 +270,18 @@ int jack_bufsiz_cb(jack_nframes_t nframes, void *arg) {
 }
 
 int jack_xrun_cb(void *arg) {
-	jack_thread_info_t *info = (jack_thread_info_t *) arg;
+	//jack_thread_info_t *info = (jack_thread_info_t *) arg;
 	pthread_mutex_lock(&io_thread_lock);
-	info->xruns++;
+	xrun_count++;
 	pthread_mutex_unlock(&io_thread_lock);
 	return 0;
+}
+
+void jack_xrun_clear() {
+	fprintf(stderr, "clearing xrun count\n");
+	pthread_mutex_lock(&io_thread_lock);
+	xrun_count = 0;
+	pthread_mutex_unlock(&io_thread_lock);
 }
 
 int process (jack_nframes_t nframes, void *arg) {
@@ -424,7 +432,6 @@ int main (int argc, char **argv) {
 	jack_status_t jstat;
 	int c;
 	char jackname[33] = "jackpeak";
-	char *lw_port = NULL;
 
 	memset(&thread_info, 0, sizeof(thread_info));
 	thread_info.channels = 2;
@@ -486,7 +493,7 @@ int main (int argc, char **argv) {
 					fprintf(stderr, "websocket: bad port.  pick between 1024 and 65535.\n");
 					exit(1);
 				} else {
-					lw_port = optarg;
+					wsport = atoi(optarg);
 					thread_info.format|=1;
 				}
 				break;
@@ -523,6 +530,7 @@ int main (int argc, char **argv) {
 
 	setup_ports(thread_info.channels, &argv[optind], &thread_info);
 
+	signal(SIGHUP, jack_xrun_clear);
 	signal(SIGINT, catchsig);
 	signal(SIGPIPE, catchsig);
 
@@ -536,12 +544,13 @@ int main (int argc, char **argv) {
 			(thread_info.channels>1)?"s":"",
 			thread_info.samplerate
 		);
-		if (lw_port != 0) fprintf(stderr, ", server @ ws://localhost:%s", lw_port);
+		if (wsport != 0) fprintf(stderr, ", server @ ws://localhost:%d", wsport);
 		fprintf(stderr, "\n");
 
 	}
 
 	/* all systems go - run the i/o thread */
+	/*
 	if (lw_port != 0) {
 		struct ws_events wse;
 		wse.onopen    = &websocket_connect;
@@ -549,12 +558,29 @@ int main (int argc, char **argv) {
 		wse.onmessage = &websocket_in;
 		ws_socket(&wse, "localhost", lw_port, 1, 0);
 	}
+	*/
 
-
+	if (wsport != 0) {
+		ws_socket(&(struct ws_server){
+			/*
+		 	 * Bind host:
+		 	 * localhost -> localhost/127.0.0.1
+		 	 * 0.0.0.0   -> global IPv4
+		 	 * ::        -> global IPv4+IPv6 (DualStack)
+		 	 */
+			.host = "localhost",
+			.port = wsport,
+			.thread_loop   = 1,
+			.timeout_ms    = 1000,
+			.evs.onopen    = &websocket_connect,
+			.evs.onclose   = &websocket_disconnect,
+			.evs.onmessage = &websocket_in
+		});
+	}
 	thread_info.can_capture = 1;
-
 	pthread_join(thread_info.thread_id, NULL);
 	jack_client_close(client);
+
 	cleanup(&thread_info);
 
 	return(0);
